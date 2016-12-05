@@ -26,7 +26,7 @@ def process():
     while(True):
         lock.acquire(1)
 
-        if(len(signal) != 256):
+        if(len(signal) == 256):
             w = np.multiply(signal, hamming)
             fft = np.abs(np.fft.rfft(w))
             mel_vals = np.dot(filter_bank, np.transpose(fft))
