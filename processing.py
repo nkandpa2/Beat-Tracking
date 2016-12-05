@@ -3,59 +3,60 @@ import scipy.io
 import threading
 import thread
 import time
+import pyaudio
 
 signal = 0
-state = 0
 lock = threading.Lock()
 filter_bank = scipy.io.loadmat('filter_bank.mat')
 filter_bank = filter_bank['mel_filters']
+hamming = np.hamming(256)
 
 class BeatThread(threading.Thread):
-    def __init__(self, threadID, function_num):
+    def __init__(self, function):
         threading.Thread.__init__(self)
-        self.threadID = threadID
-        self.function_num = function_num
+        self.function = function
 
     def run(self):
-        if(self.function_num == 0):
-            generate_signal()
-        else:
-            process()
-
+        self.function()
 
 def process():
-    print("Thread 2 Started")
+    global filter_bank
+    global signal
+    global hamming
     while(True):
-        global state
-        if(state == 1):
-            lock.acquire(1)
-            global signal
-            global filter_bank
-            w = np.multiply(signal, np.hamming(len(signal)))
+        lock.acquire(1)
+
+        if(len(signal) != 256):
+            w = np.multiply(signal, hamming)
             fft = np.abs(np.fft.rfft(w))
             mel_vals = np.dot(filter_bank, np.transpose(fft))
             print("Processing")
-            lock.release()
-            state = 0
+
+        lock.release()
 
 def generate_signal():
-    print("Thread 1 Started")
+    p = pyaudio.PyAudio()
+    stream = p.open(
+                    format = pyaudio.paInt16,
+                    channels = 1,
+                    rate = 8000,
+                    input_device_index = 1,
+                    input = True)
+
+    global signal
+
     while(True):
-        global state
-        if(state == 0):
-            lock.acquire(1)
-            global signal
-            signal = np.random.rand(1,256)
-            print("Sampling")
-            lock.release()
-            state = 1
+        new_samples = stream.read(256)
+        lock.acquire(1)
+        signal = np.fromstring(new_samples)
+        print("Sampling")
+        lock.release()
 
     
-thread1 = BeatThread(0, 0)
-thread2 = BeatThread(1, 1)
+thread1 = BeatThread(generate_signal)
+thread2 = BeatThread(process)
 
 thread1.start()
-time.sleep(1)
 thread2.start()
     
     
