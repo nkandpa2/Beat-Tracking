@@ -10,7 +10,7 @@ class BeatTracker:
     #Constructor that initializes all of the variables necessary for algorithm
     def __init__(self):
         #Mel Filter Bank
-        self.filter_bank = scipy.io.loadmat('filter_bank.mat')['mel_filters']
+        self.filter_bank = np.load('mel_filters.npy')
 
         #Hamming Window 
         self.hamming = np.hamming(256)
@@ -43,7 +43,7 @@ class BeatTracker:
         self.alpha = -1
 
         #Number of decreasing values in cum_score that need to be seen before a peak is recognized
-        self.threshold = 5
+        self.threshold = 8
 
         #Flag for when we see a peak in the cumulative score
         self.peak_detected = False
@@ -68,6 +68,18 @@ class BeatTracker:
     
     
 ############################################################################################################
+
+    #Performs downsampling (without filtering) by simply taking every sixth value
+    def simple_downsample(self, new_samples):
+        for i in range(0, len(new_samples)):
+            if(i % 6 == 0):
+                new_samples[i/6] = new_samples[i]
+
+        return new_samples[0:32]
+
+
+############################################################################################################
+
 
     #Adds 4 ms of new audio to last 28 ms of previous window to give past 32 ms of audio
     def create_window(self, new_samples):
@@ -141,7 +153,7 @@ class BeatTracker:
                 self.num_decreasing = 0
                 self.prev_peak = self.cum_score[self.index - self.threshold - 3]
 
-            elif(self.cum_score[self.index - 1] < self.cum_score[self.index - 2]):
+            elif(self.cum_score[self.index - 1] < self.cum_score[self.index - 2] + 0.2*self.alpha):
                 self.num_decreasing += 1
 
 
@@ -157,12 +169,12 @@ class BeatTracker:
     #Performs autocorrelation on onset envelope to find the global tempo estimate and stores this estimate in tempo_samples
     def autocorrelate(self, max_lag):
         samples_per_beat = np.round(1.0 / (120.0/60.0/250.0)) #Defaults to 120 bpm or 125 samples per beat
-        acr = np.zeros(max_lag)
-        onset_lag = self.onset_env[0:self.index*2]
 
-        for i in range(0,max_lag):
-            onset_lag = np.append(np.zeros(i), self.onset_env[0:self.index*2 - i]) 
-            acr[i] = np.correlate(self.onset_env[0:self.index*2], onset_lag)
+        onset = self.onset_env[0:self.index + max_lag]
+        f = np.fft.fft(onset)
+        power = np.multiply(f, np.conjugate(f))
+        acr = np.abs(np.fft.ifft(power))
+        acr = acr[0:max_lag]
         
         r = np.arange(1, max_lag + 1)
         window = np.exp(-0.5*np.power(np.log2(r/samples_per_beat), 2))
@@ -205,11 +217,13 @@ class BeatTracker:
 def process(in_data, frame_count, time_info, status_flags):
     global tracker
     new_samples = np.fromstring(in_data, 'Int16')
+    new_samples = tracker.simple_downsample(new_samples)
     tracker.create_window(new_samples)
     
     if(tracker.index == 750):
         tracker.autocorrelate(tracker.index)
         tracker.alpha = np.std(tracker.onset_env[0:tracker.index])
+        print("Alpha: " + str(tracker.alpha))
 
     tracker.calc_onset()
     tracker.calc_score()
@@ -233,9 +247,9 @@ if __name__ == "__main__":
 
     stream = p.open(format = pyaudio.paInt16,
                     channels = 1,
-                    rate = 8000,
+                    rate = 48000,
                     input_device_index = 1,
-                    frames_per_buffer = 32,
+                    frames_per_buffer = 192,
                     input = True,
                     stream_callback = process
                     )
