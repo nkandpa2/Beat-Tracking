@@ -43,7 +43,7 @@ class BeatTracker:
         self.alpha = -1
 
         #Number of decreasing values in cum_score that need to be seen before a peak is recognized
-        self.threshold = 8
+        self.threshold = 10 
 
         #Flag for when we see a peak in the cumulative score
         self.peak_detected = False
@@ -120,7 +120,7 @@ class BeatTracker:
             self.cum_score[self.index] = self.onset_env[self.index]
         
         else:
-            prev_beat = self.alpha*self.prev_beat_window + self.cum_score[self.index - 2*self.tempo_samples : self.index - self.tempo_samples/2]
+            prev_beat = self.alpha*self.prev_beat_window + self.cum_score[self.index - 2*self.tempo_samples : self.index - np.round(self.tempo_samples/2)]
             self.cum_score[self.index] = self.onset_env[self.index] + np.max(prev_beat)
 
   
@@ -210,6 +210,20 @@ class BeatTracker:
         self.prev_beat_window = np.fliplr([self.prev_beat_window])[0]
 
 
+############################################################################################################
+    
+    #Function to evaluate whether the initial global tempo estimate was accurate
+    def calc_metric(self):
+        cum_score = self.cum_score[750:self.index + 5*self.tempo_samples]
+        diff = np.diff(cum_score)
+        spectrum = np.fft.fft(diff)
+        power = np.multiply(spectrum, np.conjugate(spectrum))
+        acr = np.abs(np.fft.ifft(power))
+        acr = acr[0:5*self.tempo_samples]
+        tempo = np.argmax(acr[(int)(np.round(self.tempo_samples/2)) : len(acr)])
+        tempo += (int)(np.round(self.tempo_samples/2))
+        return tempo
+
 
 ############################################################################################################
 
@@ -224,6 +238,16 @@ def process(in_data, frame_count, time_info, status_flags):
         tracker.autocorrelate(tracker.index)
         tracker.alpha = np.std(tracker.onset_env[0:tracker.index])
         print("Alpha: " + str(tracker.alpha))
+
+    if(tracker.index == 2500):
+        tempo = tracker.calc_metric()
+        if(np.abs(tempo - tracker.tempo_samples) > 5):
+            print("Recalculating Tempo")
+            print("Prev: " + str(tracker.tempo_samples) + "\nMetric: " + str(tempo))
+            tracker.autocorrelate(tracker.index)
+            tracker.cum_score[tracker.index - 2*tracker.tempo_samples:tracker.index] = tracker.onset_env[tracker.index - 2*tracker.tempo_samples:tracker.index]
+            tracker.prev_peak = 0
+
 
     tracker.calc_onset()
     tracker.calc_score()
@@ -259,6 +283,6 @@ if __name__ == "__main__":
         time.sleep(0.1)
         t2 = time.time()
     stream.close()
-    scipy.io.savemat('vars.mat', mdict = {'onset_env':tracker.onset_env, 'cum_score':tracker.cum_score, 'beats':tracker.beats})
+    scipy.io.savemat('vars.mat', mdict = {'onset_env':tracker.onset_env, 'cum_score':tracker.cum_score, 'beats':tracker.beats, 'tempo':tracker.tempo_samples})
         
  
